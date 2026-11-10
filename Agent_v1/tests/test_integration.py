@@ -91,6 +91,19 @@ def test_metric_compile_execution(tmp_path):
     assert serialize(q.id, plan, results)["answer"] == "First"
 
 
+def test_named_date_parameters(tmp_path):
+    db = tmp_path / "dates.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute("CREATE TABLE t000(d DATE, amount INTEGER)")
+    con.execute("INSERT INTO t000 VALUES ('2026-03-01',10),('2026-03-04',20),('2026-03-05',30)")
+    con.close()
+    plan = Plan(route="metric", metric="sum", tables=["t000"], time={"kind": "this_month"}, queries=[{"sql": "SELECT amount value FROM t000 WHERE d >= $start AND d < $end", "purpose": "month to date"}])
+    context = {"database": str(db), "catalog": [{"table": "t000", "parse_errors": {}}]}
+    q = Question(id="q", business_id="b", question="total", as_of_date="2026-03-04")
+    results, _, _ = execute_plan(plan, q, context, config(tmp_path), None)
+    assert serialize(q.id, plan, results)["answer"] == 30
+
+
 def test_full_pipeline_and_resume(tmp_path):
     split = tmp_path / "split"; business = split / "data" / "b1"; business.mkdir(parents=True)
     (business / "data.csv").write_text("Amount\n10\n20\n")

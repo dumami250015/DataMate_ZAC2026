@@ -94,3 +94,9 @@ def test_atomic_journal_ignores_partial_result(tmp_path):
     journal.export([q])
     assert (journal.root / "submission.jsonl").read_text().count("\n") == 1
 
+
+def test_mixed_table_rounding():
+    p = plan(output={"type": "table", "columns": ["name", "money", "percent"], "column_decimals": [None, 0, 2]})
+    result = {"columns": ["name", "money", "percent"], "rows": [["A", Decimal("12.5"), Decimal("3.125")]]}
+    assert serialize("q", p, [result])["answer"]["rows"] == [["A", 13, Decimal("3.13")]]
+

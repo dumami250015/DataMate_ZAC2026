@@ -33,7 +33,7 @@ def validate_sql(sql, allowed_tables):
                 raise ValueError(f"Unknown or forbidden relation {name}")
             used.add(name)
     for function in tree.find_all(exp.Func):
-        if isinstance(function, (exp.Case, exp.If)):
+        if isinstance(function, (exp.Case, exp.If, exp.And, exp.Or, exp.Exists)):
             continue
         name = function.name.upper() if isinstance(function, exp.Anonymous) else function.sql_name().upper()
         if name not in ALLOWED_FUNCTIONS:
@@ -106,6 +106,8 @@ def execute_plan(plan, question, context, config, calendar_path, deadline=None):
     allowed = {t["table"] for t in context["catalog"]} | {"solar_lunar_calendar"}
     bindings = parameters(plan, question, calendar_path)
     queries = [compile_metric(plan)] if plan.route == "metric" else [q.sql for q in plan.queries]
+    if not any(validate_sql(sql, allowed) for sql in queries):
+        raise ValueError("Answer queries must read the supplied business data or calendar; constant-only answers are forbidden")
     results = []
     for sql in queries:
         used = validate_sql(sql, allowed)

@@ -13,6 +13,7 @@ def context_payload(question, context, rules, max_entities=30):
         catalog.append({"table": t["table"], "role": t["role"], "grain": t["grain"], "columns": t["columns"],
                         "raw_columns": t["raw_columns"], "row_count": t["row_count"], "parse_errors": t["parse_errors"],
                         "null_counts": t["null_counts"], "samples": t["samples"][:2],
+                        "distinct_values": t.get("distinct_values", {}),
                         "coverage_start": t["mapping"].get("coverage_start"), "coverage_end": t["mapping"].get("coverage_end"),
                         "notes": t["mapping"].get("notes", [])})
     return {"question": question.model_dump(mode="json"), "rules": rules.prompt(), "README": context["readme"],

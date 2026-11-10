@@ -171,11 +171,14 @@ def build_business(root, cache_root, rules, backend=None, samples=6, deadline=No
                 bulk_insert(con, group["name"] + "_all", buffer)
         entities = []
         for item in catalog:
+            item["distinct_values"] = {}
             for col in item["columns"]:
                 n = col["name"]
                 if col["kind"] == "text" and any(x in n for x in ("name", "category", "status", "unit", "method", "group", "ingredient")):
                     rows = con.execute(f"SELECT DISTINCT {quote(n)} FROM {quote(item['table'])} WHERE {quote(n)} IS NOT NULL ORDER BY 1 LIMIT 10000").fetchall()
                     entities.extend({"table": item["table"], "column": n, "value": r[0]} for r in rows)
+                    if len(rows) <= 50:
+                        item["distinct_values"][n] = [r[0] for r in rows]
         context = {"business_id": root.name, "fingerprint": key, "database": str(db_path.resolve()), "readme": readme,
                    "catalog": catalog, "entities": entities, "source_manifest": files, "mapping_mode": "model" if backend else "raw-only"}
         context["capabilities"] = catalog_capabilities(catalog)

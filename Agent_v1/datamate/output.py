@@ -75,9 +75,13 @@ def serialize(question_id, plan, results):
     if kind in ("number", "percent"):
         answer = rounded(answer, 2 if kind == "percent" and places is None else places)
     elif kind == "list":
-        answer = [rounded(v, places) if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool) else v for v in answer]
+        if plan.output.item_decimals and len(plan.output.item_decimals) != len(answer):
+            raise ValueError("item_decimals length must match list")
+        answer = [rounded(v, plan.output.item_decimals[i] if plan.output.item_decimals else places) if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool) else v for i, v in enumerate(answer)]
     elif kind == "table":
-        answer["rows"] = [[rounded(v, places) if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool) else v for v in row] for row in answer["rows"]]
+        if plan.output.column_decimals and len(plan.output.column_decimals) != len(answer["columns"]):
+            raise ValueError("column_decimals length must match columns")
+        answer["rows"] = [[rounded(v, plan.output.column_decimals[i] if plan.output.column_decimals else places) if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool) else v for i, v in enumerate(row)] for row in answer["rows"]]
     record = {"id": question_id, "type": kind, "answer": answer}
     validate_record(record)
     return record

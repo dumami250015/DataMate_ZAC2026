@@ -65,6 +65,14 @@ class OutputSpec(Strict):
     type: Literal["number", "percent", "string", "date", "boolean", "list", "table"]
     decimals: int | None = Field(None, ge=0, le=8)
     columns: list[str] = Field(default_factory=list)
+    column_decimals: list[int | None] = Field(default_factory=list)
+    item_decimals: list[int | None] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_precision(self):
+        if any(p is not None and not 0 <= p <= 8 for p in self.column_decimals + self.item_decimals):
+            raise ValueError("Per-value precision must be between 0 and 8")
+        return self
 
 
 class Plan(Strict):
