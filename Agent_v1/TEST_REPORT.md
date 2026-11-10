@@ -6,7 +6,7 @@ Recorded: 11 November 2026 (Asia/Bangkok).
 
 | Check | Result |
 |---|---|
-| CPU unit/integration suite | **27 passed**, latest run 12.13 seconds |
+| CPU unit/integration suite | **30 passed**, latest run 18.50 seconds |
 | Python source compilation | `datamate/` and `scripts/` compile successfully |
 | Kaggle notebook | 11 code cells generated; every code cell parses as Python |
 | Scorer reference self-check | All 3,000 released training references score correctly against themselves |
@@ -17,6 +17,8 @@ Recorded: 11 November 2026 (Asia/Bangkok).
 The real-data runs used `prepare --raw-only`: they verify readers, profiling, source preservation, bulk insertion, and cache materialization. They do **not** establish semantic schema mapping accuracy or question-answering accuracy. The reference self-check validates the scorer's handling of released formats; it is not a model score.
 
 ## Tests exercised
+
+- Conflicting schema column names trigger a bounded model repair; identical repeated mappings are safely deduplicated.
 
 - Decimal parsing, ambiguous separators, unit suffixes, and nonfinite rejection.
 - Vietnamese dates, missing-year dates, previous-week and partial-month boundaries.
@@ -37,6 +39,7 @@ The real-data runs used `prepare --raw-only`: they verify readers, profiling, so
 - Rejection of historical stock answers from a final snapshot at a different date.
 - Rejection of zero answers for periods wholly outside documented coverage.
 - Complete controller execution and resume with a fake model.
+- Decimal bulk transport across inferred precision boundaries (`99999`, `100000`, and a 15-digit fractional value).
 
 ## Local test environment
 

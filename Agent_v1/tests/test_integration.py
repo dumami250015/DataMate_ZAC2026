@@ -3,7 +3,7 @@ import duckdb
 import pytest
 from datamate.config import Config
 from datamate.contracts import TableMapping, Plan, Question, Review
-from datamate.storage import build_business
+from datamate.storage import build_business, bulk_insert
 from datamate.rules import Rulebook
 from datamate.execution import execute_plan, run_sql
 from datamate.output import serialize
@@ -125,4 +125,24 @@ def test_full_pipeline_and_resume(tmp_path):
     assert read_json(run / "results" / "q1.json")["answer"] == 30
     agent.predict()
     assert backend.calls == 1
+
+
+def test_bulk_insert_does_not_narrow_decimal_width(tmp_path):
+    from decimal import Decimal
+
+    db = tmp_path / "decimal.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute("CREATE TABLE amounts(value DECIMAL(38,8))")
+    bulk_insert(
+        con,
+        "amounts",
+        [[Decimal("99999")], [Decimal("100000")], [Decimal("123456789012345.125")]],
+    )
+    values = [row[0] for row in con.execute("SELECT value FROM amounts ORDER BY value").fetchall()]
+    con.close()
+    assert values == [
+        Decimal("99999.00000000"),
+        Decimal("100000.00000000"),
+        Decimal("123456789012345.12500000"),
+    ]
 

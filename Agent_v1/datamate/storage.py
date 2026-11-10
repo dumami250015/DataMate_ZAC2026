@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+from decimal import Decimal
 from pathlib import Path
 import duckdb
 import pandas as pd
@@ -37,9 +38,41 @@ def raw_mapping(headers):
     return TableMapping(columns=[{"source": h, "semantic": f"field_{i:03d}", "kind": "text"} for i, h in enumerate(headers)])
 
 
+def map_source(backend, payload, source, samples=6, deadline=None):
+    """Repair invalid model mappings without guessing which conflicting column to discard."""
+    request = dict(payload)
+    for attempt in range(2):
+        mapping = backend.structured(MAPPING, request, TableMapping, thinking=False, deadline=deadline)
+        # Identical repeated specifications carry no additional meaning.
+        unique = []
+        for column in mapping.columns:
+            if column not in unique:
+                unique.append(column)
+        mapping = mapping.model_copy(update={"columns": unique})
+        profile = payload["profile"] if mapping.header_row == 1 else profile_rows(source, mapping.header_row, samples)
+        try:
+            valid_mapping(mapping, profile["headers"])
+            return mapping
+        except ValueError as exc:
+            if attempt == 1:
+                raise ValueError(f"Mapping failed for {source.path.name}/{source.sheet}: {exc}; proposal={dumps(mapping.model_dump())}") from exc
+            request = dict(payload, repair={"error": str(exc), "previous_mapping": mapping.model_dump(),
+                                           "instruction": "Each source header and semantic name must occur once. Use distinct precise semantic names for distinct source columns. Do not drop or merge conflicting meanings."})
+
+
 def bulk_insert(connection, table, rows):
-    """Vectorized ingestion; Decimal objects remain exact until the explicit target cast."""
-    frame = pd.DataFrame(rows, columns=[f"v{i}" for i in range(len(rows[0]))], dtype=object)
+    """Vectorized ingestion without Pandas/DuckDB narrowing Decimal precision.
+
+    DuckDB's Pandas scanner infers a DECIMAL width from values observed early in an
+    object column. A later wider value in the same batch can then fail before it is
+    cast to the destination DECIMAL(38,8). Transport Decimal values as canonical
+    strings so the destination table owns the numeric type and precision.
+    """
+    transported = [
+        [format(value, "f") if isinstance(value, Decimal) else value for value in row]
+        for row in rows
+    ]
+    frame = pd.DataFrame(transported, columns=[f"v{i}" for i in range(len(rows[0]))], dtype=object)
     connection.register("_ingest_batch", frame)
     try:
         connection.execute(f"INSERT INTO {quote(table)} SELECT * FROM _ingest_batch")
@@ -80,7 +113,7 @@ def build_business(root, cache_root, rules, backend=None, samples=6, deadline=No
             elif backend:
                 payload = {"file": source.path.name, "sheet": source.sheet, "README": readme, "preview": first[:12], "profile": preliminary,
                            "file_rules": {k: v for k, v in rules.clauses.items() if "Cách ghi" in v["section"]}}
-                mapping = backend.structured(MAPPING, payload, TableMapping, thinking=False, deadline=deadline)
+                mapping = map_source(backend, payload, source, samples, deadline)
                 mapping_cache[mapping_key] = mapping
             else:
                 mapping = raw_mapping(preliminary["headers"])

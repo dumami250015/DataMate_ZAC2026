@@ -115,6 +115,7 @@ class Agent:
                 record = {"id": question.id, "type": "abstain"}
                 prior = {"error": f"{type(exc).__name__}: {exc}", "previous_plan": plan.model_dump(mode="json") if plan else None}
                 log["attempts"].append(prior)
+                logger.warning("%s attempt %d failed: %s", question.id, attempt + 1, prior["error"])
                 if isinstance(exc, TimeoutError):
                     break
         log.update({"final_answer": record, "elapsed_seconds": time.monotonic() - started,
