@@ -1,0 +1,17 @@
+paths:
+  split: /data
+  model: /opt/models/qwen35-9b
+  work: /result
+model:
+  backend: transformers
+  quantization: none
+  dtype: bfloat16
+  context_tokens: 32768
+pipeline:
+  verify_with_llm: true
+runtime:
+  run_deadline_seconds: 21000
+  finalization_reserve_seconds: 180
+  memory_limit: 8GB
+  threads: 4
+

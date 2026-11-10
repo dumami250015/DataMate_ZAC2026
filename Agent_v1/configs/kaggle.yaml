@@ -1,0 +1,35 @@
+paths:
+  split: /kaggle/input/datamate-data/train
+  model: /kaggle/input/qwen35-9b-checkpoint
+  work: /kaggle/working/datamate
+model:
+  backend: transformers
+  revision: local-content-hash
+  quantization: nf4
+  dtype: float16
+  device_map: auto
+  context_tokens: 32768
+  max_new_tokens: 3072
+  thinking_tokens: 4096
+  thinking: false
+  repair_thinking: true
+  attention: sdpa
+pipeline:
+  semantic_repairs: 1
+  verify_with_llm: true
+  mapping_with_llm: true
+  generated_sql_fallback: true
+  max_result_rows: 1000
+  profile_samples: 6
+  max_entity_candidates: 30
+runtime:
+  seed: 42
+  sql_timeout_seconds: 30
+  run_deadline_seconds: 18000
+  finalization_reserve_seconds: 120
+  export_every_questions: 5
+  memory_limit: 2GB
+  threads: 2
+  resume: true
+  fail_fast: false
+
