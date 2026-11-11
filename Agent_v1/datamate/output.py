@@ -24,7 +24,7 @@ def rounded(value, places=None):
 
 def scalar(result):
     if len(result["rows"]) != 1 or len(result["rows"][0]) != 1:
-        raise ValueError("Expected one scalar result")
+        raise ValueError(f"Expected one scalar result, got {len(result['rows'])} rows and columns {result.get('columns', [])}")
     v = result["rows"][0][0]
     if v is None:
         raise ValueError("NULL is not a supported answer")
@@ -64,11 +64,17 @@ def serialize(question_id, plan, results):
         if len(results) != 1:
             raise ValueError("Direct output requires one query")
         result = results[0]
+        if plan.output.answer_column and kind != "table":
+            name = plan.output.answer_column
+            if result["columns"].count(name) != 1:
+                raise ValueError(f"Expected one column named {name!r}, got {result['columns']}")
+            index = result["columns"].index(name)
+            result = {"columns": [name], "rows": [[row[index]] for row in result["rows"]]}
         if kind == "table":
             answer = {"columns": plan.output.columns or result["columns"], "rows": result["rows"]}
         elif kind == "list":
             if any(len(row) != 1 for row in result["rows"]):
-                raise ValueError("List query must return one ordered value per row")
+                raise ValueError(f"List query must project one ordered value per row or name answer_column; got {result['columns']}")
             answer = [row[0] for row in result["rows"]]
         else:
             answer = scalar(result)
@@ -132,15 +138,18 @@ class Journal:
         self.count = 0
 
     def has(self, qid):
+        return self.load_result(qid) is not None
+
+    def load_result(self, qid):
         p = self.root / "results" / (qid + ".json")
         if not p.exists():
-            return False
+            return None
         try:
             record = read_json(p)
             validate_record(record)
-            return record["id"] == qid
+            return record if record["id"] == qid else None
         except (ValueError, OSError):
-            return False
+            return None
 
     def commit(self, qid, record, log):
         validate_record(record)
@@ -150,7 +159,9 @@ class Journal:
         self.count += 1
 
     def export(self, questions, public_path=None, publish_logs=False):
-        records = [read_json(self.root / "results" / (q.id + ".json")) if self.has(q.id) else {"id": q.id, "type": "abstain"} for q in questions]
+        committed = [self.load_result(q.id) for q in questions]
+        records = [record if record is not None else {"id": q.id, "type": "abstain"}
+                   for q, record in zip(questions, committed, strict=True)]
         text = "".join(dumps(r) + "\n" for r in records)
         atomic_text(self.root / "submission.jsonl", text)
         if public_path:
@@ -160,6 +171,6 @@ class Journal:
                 source = self.root / "logs" / (q.id + ".json")
                 log = read_json(source) if source.exists() else {"id": q.id, "final_answer": record, "elapsed_seconds": 0, "status": "not_completed"}
                 write_json(self.root.parent.parent / "logs" / (q.id + ".json"), log)
-        write_json(self.root / "progress.json", {"total": len(questions), "completed": sum(self.has(q.id) for q in questions)})
+        write_json(self.root / "progress.json", {"total": len(questions), "completed": sum(record is not None for record in committed)})
         return self.root / "submission.jsonl"
 

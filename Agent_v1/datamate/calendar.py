@@ -2,6 +2,7 @@ import calendar as cal
 import csv
 from datetime import date, timedelta
 from .contracts import TimeSpec
+from .normalize import parse_date
 
 
 def previous_month(d):
@@ -43,7 +44,10 @@ def resolve(spec: TimeSpec, as_of: date, calendar_path=None):
         final_m = m if k == "month" else m + 2
         end = date(y, final_m, cal.monthrange(y, final_m)[1]) + timedelta(days=1)
     elif k == "range":
-        start, end = date.fromisoformat(spec.start), date.fromisoformat(spec.end) + timedelta(days=1)
+        if not (spec.start and spec.start.strip() and spec.end and spec.end.strip()):
+            raise ValueError("range requires inclusive ISO start and end dates")
+        start = date.fromisoformat(parse_date(spec.start))
+        end = date.fromisoformat(parse_date(spec.end)) + timedelta(days=1)
     elif k == "tet":
         y = spec.year or as_of.year
         if calendar_path is None:

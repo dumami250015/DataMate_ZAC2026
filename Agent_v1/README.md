@@ -2,7 +2,7 @@
 
 An offline Qwen3.5-9B agent for Vietnamese questions over CSV, Excel, and SQLite business packages. It is implemented as a reusable Python package with a Kaggle notebook and a CLI.
 
-**Start with `notebooks/01_datamate_runner.ipynb`.** Attach the source, challenge data, and a complete local Qwen checkpoint, edit the paths in Cell 1, and run a development subset before enabling the full run.
+**Start with `notebooks/01_datamate_runner.ipynb`.** Attach the source, challenge data, and a complete local Qwen checkpoint, verify the discovered paths in Cell 1, and run a development subset before enabling the full run.
 
 This is a working source implementation, not a measured competition score. CPU execution, ingestion, scoring, and controller behavior have been tested locally. The Qwen GPU loader, quantization kernels, and full inference accuracy must be tested in your Kaggle GPU session. See `TEST_REPORT.md` for the actual checks completed.
 
@@ -18,7 +18,7 @@ This is a working source implementation, not a measured competition score. CPU e
 | Rules | Runtime split rulebook with stable clause references; complete rule text passed to planning/review |
 | Capabilities | Structural prerequisites and explicit unknown state; parsing failures never establish absence |
 | Planning | Validated JSON plans, parameterized calendar intervals, entity candidates |
-| Common execution | Deterministic sum/count/distinct-count/average/ranking/group-sum compiler |
+| Common execution | Documented purchase and sales totals, plus a deterministic metric compiler |
 | General execution | Read-only SQL for debt, inventory, purchases, profit, industry-specific tables and unusual joins |
 | Verification | AST restrictions, source-column checks, parse checks, explicit SQL invariant checks, semantic review |
 | Repair | One bounded repair by default, with concrete failure feedback |
@@ -37,9 +37,10 @@ No answers or business-specific rules are hard-coded. IDs select data and name l
 2. Attach the challenge dataset with `train/` and/or `public_test/` intact. Each selected split needs `data/`, `rulebook.md`, `calendar.csv`, and `questions.jsonl`.
 3. Attach a complete official `Qwen/Qwen3.5-9B` checkpoint: config, tokenizer/chat template, shard index, and **all** safetensors shards. Set MODEL to the actual checkpoint directory. Use a known revision and retain its license.
 4. Select an available GPU. For a 16 GB T4-class GPU, begin with the NF4/FP16 candidate profile. For supported 32 GB+ devices, test unquantized BF16 separately. Hardware compatibility is checked by actually loading and generating; there is no silent CPU/random-weight fallback.
-5. Import `notebooks/01_datamate_runner.ipynb` into Kaggle and edit SOURCE, SPLIT, MODEL, WHEELS, and WORK.
-6. Install requirements from a compatible attached wheelhouse, or perform one Internet-enabled **setup-only** session with the notebook's explicit installation switches. Restart if necessary, then disable Internet and run inference offline.
-7. Run the backend smoke test and the development business. Inspect `parse_errors`, logs, and training-only metrics.
+5. Import `notebooks/01_datamate_runner.ipynb` into Kaggle. Cell 1 discovers the attached source, data split, checkpoint, and optional wheelhouse. Set `SPLIT_NAME` to the split you want to run and check the resolved paths.
+6. In Cell 3, use `DEPENDENCY_SOURCE="wheelhouse"` with an attached wheelhouse for an offline run. Use `DEPENDENCY_SOURCE="internet"` for an Internet-enabled setup session.
+7. Run the backend smoke test and the 20-question development run. Cell 8 prints answer counts by strategy and abstention reasons. On the training split, Cell 9 compares each prediction with its released reference.
+   To audit split-wide rows 21–1000, set `DEV_BUSINESSES = None`, `DEV_OFFSET = 20`, and `DEV_LIMIT = 980` in Cell 6. Keep `RUN_FULL = False` for this range.
 8. Set `RUN_FULL=True` to generate every answer. Save `/kaggle/working/datamate/submission.jsonl` and the associated `runs/` artifacts.
 
 Default example paths:
@@ -54,9 +55,17 @@ Default example paths:
 
 Kaggle dataset mounts can contain extra nested directories; use the paths shown in your notebook's input browser. The code never writes into `/kaggle/input`.
 
+When updating the source, upload the entire `Agent_v1_source.zip`, select the new dataset version in Kaggle, and run from Cell 1. Cell 1 skips source copies that lack chunked prefill support. If the kernel still has an older package loaded, Cell 4 reimports a clean copy from the selected source and prints the config path.
+
 ## Dependency setup and reproducibility
 
 `requirements-cpu.txt` contains CPU dependencies. `requirements-kaggle.txt` adds the candidate GPU stack. These are compatibility ranges, **not a claim of a validated CUDA lockfile**. The Qwen3.5 model class and hybrid-attention kernels require a sufficiently recent compatible runtime.
+
+The SQL validator supports Kaggle's preinstalled SQLGlot 25.20.2, so a fresh session with that version can keep it alongside Ibis. The optional `causal_conv1d` and `flash-linear-attention` warnings indicate that the loaded model is using slower PyTorch kernels.
+
+The Kaggle profile uses Transformers 5.20.2 or later and processes prompts longer than 512 tokens in chunks. It passes the entire prompt to Qwen and carries the cache across chunks. A CUDA out-of-memory error stops the run and leaves the affected question incomplete.
+
+Structured Transformers generation stops at a complete JSON object. The Kaggle profile starts plans and reviews at 1,024 output tokens and disables thinking on repair attempts. When a plan reaches the output limit, the retry can use 1,536 tokens. Wider schema mappings keep their own generation limit.
 
 In a setup session, starting with Kaggle's CUDA-enabled Torch installation:
 
@@ -105,6 +114,14 @@ python -m datamate.cli predict --config configs/kaggle.yaml --business biz_101 -
 python -m datamate.cli predict --config configs/kaggle.yaml \
   --split /kaggle/input/datamate-data/public_test --model /actual/checkpoint
 
+# Evaluate the verified route on training rows 21–1000 with CPU only.
+python -m datamate.cli predict --config configs/kaggle.yaml \
+  --split ../Data/train --work ./work/train-audit --verified-only --offset 20 --limit 980
+
+# Check the verified route independently on the released public split.
+python -m datamate.cli predict --config configs/kaggle.yaml \
+  --split ../Data/public_test --work ./work/public-audit --verified-only
+
 # Score only selected development records; omit --selected-only for full-split PA.
 python -m datamate.cli evaluate --predictions /work/submission.jsonl \
   --answers /data/train/answers.jsonl --questions /data/train/questions.jsonl \
@@ -130,9 +147,11 @@ Each view contains:
 
 Schema families group matching schemas from monthly sheets or numbered/year-suffixed file exports. A new schema/mapping produces a separate table. Repeated printed headers are removed only when they exactly match the source header. Other suspicious summary/footer rows remain visible so they must be explicitly excluded based on evidence.
 
-Decimal separators are explicit column metadata. Ambiguous `189,000` with no established convention fails normalization instead of silently becoming 189 or 189000. Blank group values fill only under a mapped key and allowed fill columns. Identical rows in an orderless ledger remain distinct.
+The normalizer uses unambiguous column samples to identify the decimal separator and preserves native numeric cells. Ambiguous `189,000` with no established convention fails normalization. Blank group values fill only under a mapped key and allowed fill columns. Identical order lines with a mapped order ID and line identifier are marked as export duplicates. Identical rows in an orderless ledger remain distinct. If mapping repair fails, the agent retains original columns and unambiguous mappings and disables model-proposed grouped fill and deduplication.
 
 Capability `supported` means structural prerequisites exist, not that every query using them is correct. Time validity, joins, returns, and coverage still require checks. `unknown` is not `unanswerable`.
+
+The catalog records the minimum and maximum observed date for each normalized date column across the whole schema family. When a queried date column contradicts a model-proposed coverage bound, execution uses the observed record to extend that bound.
 
 ## Plan and query execution
 
@@ -142,6 +161,12 @@ Capability `supported` means structural prerequisites exist, not that every quer
 - `route=sql`: one or more SELECTs implement more general analytics.
 - `route=unanswerable`: specific absence evidence, independently reviewed.
 - `route=abstain`: unresolved interpretation.
+
+The verified route supports documented purchases and sales totals, order counts, averages, rankings, customer-group revenue shares, and stock snapshots. It checks the relevant rules, date and shift bounds, status labels, keys, and required data. Formatted purchase prices with ambiguous separators must reconcile to receipt totals. Questions outside the verified route use the general planner.
+
+Documented sales columns may be identified by their descriptions, including flat exports with report headings before the actual header. Printed subtotal rows with missing transaction and item identifiers stay in the raw physical table and are excluded from the query view. Verified-only mode logs the missing evidence or unsupported intent when a question needs the model. Its public split output measures coverage and execution, since public reference answers are unavailable locally.
+
+Verified queries and their checks share one read-only worker connection per question. For generated SQL, the controller derives physical table names from the query, DuckDB resolves columns and named parameters, and the reviewer receives the SQL that ran with its resolved bounds. Generated scalar and list answers may explicitly name a single `output.answer_column` when the result contains supporting columns.
 
 Named parameters are resolved from the supplied as-of date: `$start`, `$end`, `$as_of`, `$as_of_end`, `$comparison_start`, `$comparison_end`. End dates are exclusive. Relative dates and Tết use deterministic calendar logic. A NULL unresolved bound is rejected if a query tries to use it.
 
@@ -183,11 +208,11 @@ Tests use temporary synthetic data and a fake model where appropriate. They do n
 | Missing Qwen3.5 model class | Install a compatible recent Transformers build, restart, rerun smoke test |
 | Missing language weights or shape mismatch | Stop; check complete checkpoint and loader compatibility |
 | NF4 or DeltaNet kernel error | Inspect GPU/Torch/CUDA/bitsandbytes compatibility; select a tested profile explicitly |
-| Out of memory | Reduce context only after measuring prompt lengths, reduce model/batch overhead, or change supported hardware; do not silently truncate mandatory rules |
+| Out of memory during generation | Check the prompt length and chunk size in the error. For a T4, try `model.prefill_chunk_size: 256` in `configs/kaggle.yaml` or use a GPU with more memory |
 | Context budget exceeded | Inspect catalog/README size; increase a tested context budget or reduce profile samples/entity candidates; full rules are never silently removed |
 | Unsupported SQL function | Inspect its sqlglot-normalized name; add only a reviewed pure function and a test |
 | Parse failure in a required column | Inspect raw cells and mapping; repair the mapping/normalizer, invalidate the code cache, rerun |
-| Almost every answer abstains | Inspect preparation and first question logs; this often signals environment, mapping, context, or SQL issues |
+| Almost every answer abstains | Review the notebook's abstention summary or run `python scripts/diagnose_run.py /path/to/runs/<fingerprint>`, then inspect the example question logs |
 | Slow preparation | Ensure bulk inserts are active, inspect spreadsheet size and model mapping calls, reuse matching caches |
 | Notebook closes | Restore saved work outputs and rerun identical inputs/configuration |
 

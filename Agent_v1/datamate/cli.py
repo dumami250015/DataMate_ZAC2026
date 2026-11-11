@@ -18,6 +18,9 @@ def main():
         p.add_argument("--split"); p.add_argument("--model"); p.add_argument("--work")
         p.add_argument("--business", action="append", dest="businesses")
         p.add_argument("--limit", type=int)
+        if command == "predict":
+            p.add_argument("--offset", type=int, default=0, help="Skip this many questions after business filtering")
+            p.add_argument("--verified-only", action="store_true", help="Audit documented queries without a checkpoint")
         if command == "prepare":
             p.add_argument("--raw-only", action="store_true")
     p = sub.add_parser("evaluate")
@@ -51,7 +54,9 @@ def main():
     config = Config.load(args.config, split=args.split, model=args.model, work=args.work)
     if args.limit is not None and args.limit <= 0:
         parser.error("limit must be positive")
-    agent = Agent(config, raw_only=getattr(args, "raw_only", False))
+    if getattr(args, "offset", 0) < 0:
+        parser.error("offset must be nonnegative")
+    agent = Agent(config, raw_only=getattr(args, "raw_only", False), verified_only=getattr(args, "verified_only", False))
     if args.command == "smoke":
         print("Backend loaded and structured generation passed"); return
     if args.command == "prepare":
@@ -60,7 +65,7 @@ def main():
             context = agent.prepare(business)
             print(business, context["database"], len(context["catalog"]))
         return
-    print(agent.predict(args.businesses, args.limit))
+    print(agent.predict(args.businesses, args.limit, offset=args.offset))
 
 
 if __name__ == "__main__":

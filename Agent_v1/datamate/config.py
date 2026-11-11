@@ -21,7 +21,9 @@ class ModelConfig(Strict):
     dtype: Literal["float16", "bfloat16", "float32"] = "float16"
     device_map: str = "auto"
     context_tokens: int = Field(16384, ge=2048)
+    prefill_chunk_size: int | None = Field(None, ge=1)
     max_new_tokens: int = Field(3072, ge=128)
+    plan_tokens: int | None = Field(None, ge=128)
     thinking_tokens: int = Field(4096, ge=128)
     thinking: bool = False
     repair_thinking: bool = True

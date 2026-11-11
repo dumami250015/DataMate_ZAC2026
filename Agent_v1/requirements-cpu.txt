@@ -1,6 +1,6 @@
 # Compatible ranges; exact tested local versions are recorded in TEST_REPORT.md.
 duckdb>=1.2,<3
-sqlglot>=26,<31
+sqlglot>=25.20.2,<31
 pydantic>=2.10,<3
 PyYAML>=6,<7
 openpyxl>=3.1,<4

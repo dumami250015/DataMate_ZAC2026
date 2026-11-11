@@ -1,7 +1,7 @@
 -r requirements-cpu.txt
 # Candidate GPU environment: freeze after the Kaggle smoke test passes.
 # Keep Kaggle's compatible CUDA torch build; do not replace it blindly.
-transformers>=5.3,<6
+transformers>=5.20.2,<6
 accelerate>=1.3,<2
 bitsandbytes>=0.45,<1
 safetensors>=0.5

@@ -1,9 +1,11 @@
 from __future__ import annotations
 import csv
 import random
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from .normalize import infer_decimal_separator
 from .util import file_hash, digest, quote
 
 
@@ -88,13 +90,23 @@ def preview(source, count=30):
 
 
 def profile_rows(source, header_row=1, samples=6):
-    headers, reservoir, count, nulls = [], [], 0, []
+    headers, reservoir, count, nulls, prefix = [], [], 0, [], []
     rng = random.Random(42)
+    format_examples = {}
     for index, row in enumerate(source.rows(), 1):
         if index < header_row:
             continue
         if index == header_row:
-            headers = [str(x).strip() if x is not None else f"unnamed_{i}" for i, x in enumerate(row)]
+            names = [str(x).strip() if x is not None and str(x).strip() else f"unnamed_{i}" for i, x in enumerate(row)]
+            reserved = set(names)
+            for i, name in enumerate(names):
+                label = name
+                if label in headers:
+                    label = f"{name} [{i + 1}]"
+                    while label in reserved:
+                        label += "_"
+                    reserved.add(label)
+                headers.append(label)
             nulls = [0] * len(headers)
             continue
         if not any(x is not None and str(x).strip() for x in row):
@@ -104,12 +116,24 @@ def profile_rows(source, header_row=1, samples=6):
         count += 1
         for i, v in enumerate(vals):
             nulls[i] += v is None or not v.strip()
-        item = {"row": index, "values": vals}
+            if i < len(row) and isinstance(row[i], str) and v and ("," in v or "." in v):
+                parts = re.split(r"[.,]", v.strip())
+                if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) != 3):
+                    separator = infer_decimal_separator([v], "auto")
+                    if separator != "auto":
+                        format_examples.setdefault(i, {}).setdefault(separator, v)
+        item = ({"row": index, "values": vals}, list(row))
+        if len(prefix) < samples:
+            prefix.append(item[1])
         if len(reservoir) < samples:
             reservoir.append(item)
         else:
             j = rng.randrange(count)
             if j < samples:
                 reservoir[j] = item
-    return {"headers": headers, "row_count": count, "null_counts": nulls, "samples": sorted(reservoir, key=lambda x: x["row"])}
+    reservoir.sort(key=lambda item: item[0]["row"])
+    return {"headers": headers, "row_count": count, "null_counts": nulls,
+            "samples": [item for item, _ in reservoir], "format_examples": format_examples,
+            "text_samples": [[v if isinstance(v, str) else None for v in row]
+                             for row in prefix + [row for _, row in reservoir]]}
 

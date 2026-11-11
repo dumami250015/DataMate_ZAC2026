@@ -1,14 +1,19 @@
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+import sys
+from contextlib import nullcontext
+from types import SimpleNamespace
+from unittest.mock import Mock, MagicMock
 import pytest
 from datamate.calendar import resolve
 from datamate.contracts import TimeSpec, Plan, Question
-from datamate.normalize import number, parse_date
+from datamate.normalize import infer_decimal_separator, number, parse_date
 from datamate.output import serialize, validate_record, Journal
 from datamate.evaluation import score_one, table_equal
 from datamate.execution import validate_sql
-from datamate.llm import extract_json
+from datamate.config import ModelConfig
+from datamate.llm import Backend, BackendMemoryError, TransformersBackend, complete_json_prefix, extract_json
 
 
 def test_numbers_are_not_silently_reinterpreted():
@@ -20,6 +25,16 @@ def test_numbers_are_not_silently_reinterpreted():
         number("189,000")
     with pytest.raises(ValueError):
         number("NaN")
+
+
+def test_thousands_format_can_be_learned_from_unambiguous_cells():
+    separator = infer_decimal_separator(["2,880,000", "878,400"], ",")
+    assert separator == "."
+    assert number("878,400", separator) == 878400
+    assert infer_decimal_separator(["1,234"], "auto") == "auto"
+    assert infer_decimal_separator(["2,880,000", "12,50"], ".") == "auto"
+    with pytest.raises(ValueError):
+        number("12,50", separator)
 
 
 def test_dates_and_boundaries():
@@ -83,6 +98,53 @@ def test_json_rejects_truncated_reasoning():
         extract_json('<think>{"a":1}')
     with pytest.raises(RuntimeError):
         extract_json('{"a":1} trailing')
+
+
+def test_structured_generation_reads_complete_object_with_wrappers():
+    class Fake(Backend):
+        def generate(self, messages, **kwargs):
+            assert kwargs["structured_output"]
+            return 'Here is the result:\n```json\n{"output":{"type":"unanswerable"},"evidence":["No payment dates"]}\n```'
+
+    result = Fake().structured("Plan the answer", {}, Plan)
+    assert result.route == "unanswerable"
+    assert result.evidence == ["No payment dates"]
+    assert complete_json_prefix('{"answer":\n{"a": 1}') is None
+    assert complete_json_prefix('{"a":1}', thinking=True) is None
+    assert complete_json_prefix('analysis</think>\n{"a":1}', thinking=True) == '{"a":1}'
+
+
+@pytest.mark.parametrize("length,oom", [(512, False), (513, False), (513, True)])
+def test_transformers_generation_uses_chunked_prefill_for_long_prompts(length, oom, monkeypatch):
+    class CudaOutOfMemory(RuntimeError):
+        pass
+
+    backend = TransformersBackend.__new__(TransformersBackend)
+    backend.config = ModelConfig(prefill_chunk_size=512)
+    backend.torch = SimpleNamespace(inference_mode=nullcontext, cuda=SimpleNamespace(
+        max_memory_allocated=lambda: 0, OutOfMemoryError=CudaOutOfMemory,
+    ))
+    tensor = Mock(shape=(1, length))
+    backend.tokenizer = Mock(return_value={"input_ids": tensor}, pad_token_id=1, eos_token_id=2,
+                             pad_token="<pad>", eos_token="<eos>")
+    backend.tokenizer.decode.return_value = "{}<eos>"
+    backend.model = Mock()
+    output = MagicMock()
+    output.__getitem__.return_value = [2]
+    backend.model.generate.return_value = output
+    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(StoppingCriteriaList=list))
+    if oom:
+        backend.model.generate.side_effect = CudaOutOfMemory("test allocation failed")
+        with pytest.raises(BackendMemoryError, match="513 prompt tokens"):
+            backend.generate([], structured_output=True)
+    else:
+        assert backend.generate([], structured_output=True) == "{}"
+    options = backend.model.generate.call_args.kwargs
+    assert options["input_ids"] is tensor.to.return_value
+    assert options.get("prefill_chunk_size") == (512 if length > 512 else None)
+    assert not options["stopping_criteria"][0](Mock(shape=(1, length + 7)), None)
+    ids = MagicMock(shape=(1, length + 8))
+    assert options["stopping_criteria"][0](ids, None)
 
 
 def test_atomic_journal_ignores_partial_result(tmp_path):

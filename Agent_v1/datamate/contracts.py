@@ -52,12 +52,12 @@ class TimeSpec(Strict):
 
 class QuerySpec(Strict):
     sql: str
-    purpose: str
+    purpose: str = ""
 
 
 class CheckSpec(Strict):
     sql: str
-    description: str
+    description: str = ""
     expectation: Literal["zero", "positive", "true"] = "zero"
 
 
@@ -65,6 +65,7 @@ class OutputSpec(Strict):
     type: Literal["number", "percent", "string", "date", "boolean", "list", "table"]
     decimals: int | None = Field(None, ge=0, le=8)
     columns: list[str] = Field(default_factory=list)
+    answer_column: str | None = None
     column_decimals: list[int | None] = Field(default_factory=list)
     item_decimals: list[int | None] = Field(default_factory=list)
 
@@ -92,6 +93,26 @@ class Plan(Strict):
     reason: str = ""
     evidence: list[str] = Field(default_factory=list)
     ambiguity: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def decision_output(cls, value):
+        if not isinstance(value, dict):
+            return value
+        queries = value.get("queries")
+        if value.get("route") == "metric" and value.get("postprocess") in (
+            "ratio_percent", "growth_percent", "difference", "average_money",
+        ) and isinstance(queries, list) and len(queries) == 2:
+            value = dict(value, route="sql")
+        if not isinstance(value.get("output"), dict):
+            return value
+        kind = value["output"].get("type")
+        if kind in ("unanswerable", "abstain") and (
+            value.get("route") == kind or ("route" not in value and not value.get("queries"))
+        ):
+            value = dict(value, route=kind)
+            del value["output"]
+        return value
 
     @model_validator(mode="after")
     def shape(self):

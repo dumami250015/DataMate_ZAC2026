@@ -9,10 +9,12 @@ model:
   dtype: float16
   device_map: auto
   context_tokens: 32768
+  prefill_chunk_size: 512
   max_new_tokens: 3072
+  plan_tokens: 1024
   thinking_tokens: 4096
   thinking: false
-  repair_thinking: true
+  repair_thinking: false
   attention: sdpa
 pipeline:
   semantic_repairs: 1
@@ -21,7 +23,7 @@ pipeline:
   generated_sql_fallback: true
   max_result_rows: 1000
   profile_samples: 6
-  max_entity_candidates: 30
+  max_entity_candidates: 12
 runtime:
   seed: 42
   sql_timeout_seconds: 30
